@@ -1,0 +1,30 @@
+{
+  "name": "@asyioflow/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client SDK for AysioFlow workflow engine",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "axios": "^1.7",
+    "zod": "^3.23"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "jest": "^29",
+    "ts-jest": "^29",
+    "axios-mock-adapter": "^2",
+    "tsup": "^8",
+    "@types/jest": "^29"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.ts"]
+  }
+}

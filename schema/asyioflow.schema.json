@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Priority": { "type": "integer", "enum": [1, 5, 10] },
+    "JobStatus": {
+      "type": "string",
+      "enum": ["pending", "queued", "running", "completed", "failed", "dead"]
+    },
+    "Job": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "type": { "type": "string" },
+        "payload": { "type": "object" },
+        "status": { "$ref": "#/definitions/JobStatus" },
+        "priority": { "$ref": "#/definitions/Priority" },
+        "max_retries": { "type": "integer" },
+        "attempts": { "type": "integer" },
+        "error": { "type": ["string", "null"] },
+        "run_at": { "type": ["string", "null"], "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "status", "priority", "max_retries", "attempts", "created_at", "updated_at"]
+    },
+    "WorkflowStep": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "job_type": { "type": "string" },
+        "payload": { "type": "object" },
+        "depends_on": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "job_type"]
+    },
+    "Workflow": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "steps": { "type": "array", "items": { "$ref": "#/definitions/WorkflowStep" } }
+      },
+      "required": ["name", "steps"]
+    },
+    "SubmitJobRequest": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "payload": { "type": "object" },
+        "priority": { "$ref": "#/definitions/Priority" },
+        "max_retries": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["type"]
+    }
+  }
+}

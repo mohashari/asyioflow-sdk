@@ -96,3 +96,124 @@ describe("AysioFlowClient — cancelJob", () => {
     mock.restore();
   });
 });
+
+import type { Workflow } from "../src/models";
+import { WorkflowStepFailedError, WorkflowTimeoutError } from "../src/exceptions";
+
+function makeCompletedJob(id: string, type: string) {
+  return makeJobData({ id, type, status: "completed" });
+}
+
+function makeFailedJob(id: string, type: string) {
+  return makeJobData({ id, type, status: "failed", error: "crash" });
+}
+
+describe("AysioFlowClient — submitWorkflow", () => {
+  test("single-step workflow returns results", async () => {
+    const fetchId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const wf: Workflow = {
+      name: "simple",
+      steps: [{ name: "fetch", jobType: "fetch-data", payload: {}, dependsOn: [] }],
+    };
+
+    const axiosInst = axios.create({ baseURL: BASE_URL });
+    const mock = new MockAdapter(axiosInst);
+    mock.onPost("/api/v1/jobs").reply(201, makeCompletedJob(fetchId, "fetch-data"));
+    mock.onGet(`/api/v1/jobs/${fetchId}`).reply(200, makeCompletedJob(fetchId, "fetch-data"));
+
+    const client = new AysioFlowClient({ baseUrl: BASE_URL, _axiosInstance: axiosInst });
+    const results = await client.submitWorkflow(wf);
+
+    expect(results["fetch"].id).toBe(fetchId);
+    mock.restore();
+  });
+
+  test("sequential workflow respects dependency order", async () => {
+    const fetchId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    const transformId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    const wf: Workflow = {
+      name: "pipeline",
+      steps: [
+        { name: "fetch", jobType: "fetch-data", payload: {}, dependsOn: [] },
+        { name: "transform", jobType: "transform-data", payload: {}, dependsOn: ["fetch"] },
+      ],
+    };
+
+    const axiosInst = axios.create({ baseURL: BASE_URL });
+    const mock = new MockAdapter(axiosInst);
+    let postCount = 0;
+    mock.onPost("/api/v1/jobs").reply(() => {
+      postCount++;
+      if (postCount === 1) return [201, makeCompletedJob(fetchId, "fetch-data")];
+      return [201, makeCompletedJob(transformId, "transform-data")];
+    });
+    mock.onGet(`/api/v1/jobs/${fetchId}`).reply(200, makeCompletedJob(fetchId, "fetch-data"));
+    mock.onGet(`/api/v1/jobs/${transformId}`).reply(200, makeCompletedJob(transformId, "transform-data"));
+
+    const client = new AysioFlowClient({ baseUrl: BASE_URL, _axiosInstance: axiosInst });
+    const results = await client.submitWorkflow(wf);
+
+    expect(Object.keys(results).sort()).toEqual(["fetch", "transform"]);
+    mock.restore();
+  });
+
+  test("failed step throws WorkflowStepFailedError with partial results", async () => {
+    const fetchId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    const transformId = "00000000-0000-0000-0000-000000000000";
+    const wf: Workflow = {
+      name: "pipeline",
+      steps: [
+        { name: "fetch", jobType: "fetch-data", payload: {}, dependsOn: [] },
+        { name: "transform", jobType: "transform-data", payload: {}, dependsOn: ["fetch"] },
+      ],
+    };
+
+    const axiosInst = axios.create({ baseURL: BASE_URL });
+    const mock = new MockAdapter(axiosInst);
+    let postCount = 0;
+    mock.onPost("/api/v1/jobs").reply(() => {
+      postCount++;
+      if (postCount === 1) return [201, makeCompletedJob(fetchId, "fetch-data")];
+      return [201, makeFailedJob(transformId, "transform-data")];
+    });
+    mock.onGet(`/api/v1/jobs/${fetchId}`).reply(200, makeCompletedJob(fetchId, "fetch-data"));
+    mock.onGet(`/api/v1/jobs/${transformId}`).reply(200, makeFailedJob(transformId, "transform-data"));
+
+    const client = new AysioFlowClient({ baseUrl: BASE_URL, _axiosInstance: axiosInst });
+    await expect(client.submitWorkflow(wf)).rejects.toBeInstanceOf(WorkflowStepFailedError);
+
+    postCount = 0; // reset so second call sees the same mock state
+    try {
+      await client.submitWorkflow(wf);
+    } catch (err) {
+      if (err instanceof WorkflowStepFailedError) {
+        expect(err.stepName).toBe("transform");
+        expect("fetch" in err.completedSteps).toBe(true);
+      }
+    }
+    mock.restore();
+  });
+
+  test("timeout throws WorkflowTimeoutError", async () => {
+    const fetchId = "11111111-2222-3333-4444-555555555555";
+    const wf: Workflow = {
+      name: "simple",
+      steps: [{ name: "fetch", jobType: "fetch-data", payload: {}, dependsOn: [] }],
+    };
+
+    const runningJob = makeJobData({ id: fetchId, type: "fetch-data", status: "running" });
+
+    const axiosInst = axios.create({ baseURL: BASE_URL });
+    const mock = new MockAdapter(axiosInst);
+    mock.onPost("/api/v1/jobs").reply(201, runningJob);
+    mock.onGet(`/api/v1/jobs/${fetchId}`).reply(200, runningJob);
+
+    const client = new AysioFlowClient({
+      baseUrl: BASE_URL,
+      _axiosInstance: axiosInst,
+      workflowTimeoutMs: 0, // immediate timeout
+    });
+    await expect(client.submitWorkflow(wf)).rejects.toBeInstanceOf(WorkflowTimeoutError);
+    mock.restore();
+  });
+});

@@ -154,7 +154,7 @@ class AsyncAysioFlow:
         _validate_dag(workflow)
         completed: dict[str, Job] = {}
         pending = {step.name: step for step in workflow.steps}
-        deadline = asyncio.get_event_loop().time() + self._workflow_timeout
+        deadline = asyncio.get_running_loop().time() + self._workflow_timeout
 
         while pending:
             ready = [
@@ -165,7 +165,7 @@ class AsyncAysioFlow:
             for step in ready:
                 job = await self.submit(SubmitJobRequest(type=step.job_type, payload=step.payload))
                 while True:
-                    if asyncio.get_event_loop().time() > deadline:
+                    if asyncio.get_running_loop().time() > deadline:
                         raise WorkflowTimeoutError(step.name)
                     job = await self.get(job.id)
                     if job.status == JobStatus.COMPLETED:

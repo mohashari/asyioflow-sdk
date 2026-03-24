@@ -125,3 +125,13 @@ describe("WorkflowSchema", () => {
     expect(wf.steps).toHaveLength(2);
   });
 });
+
+describe("Public exports", () => {
+  test("all types and classes are re-exported from index", async () => {
+    const mod = await import("../src/index");
+    expect(mod.AysioFlowClient).toBeDefined();
+    expect(mod.Priority).toBeDefined();
+    expect(mod.AysioFlowError).toBeDefined();
+    expect(mod.JobNotFoundError).toBeDefined();
+  });
+});

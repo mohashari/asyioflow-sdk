@@ -113,3 +113,19 @@ class TestWorkflow:
         )
         assert wf.name == "pipeline"
         assert len(wf.steps) == 2
+
+
+class TestPublicExports:
+    def test_client_exports(self):
+        from asyioflow import AysioFlow, AsyncAysioFlow
+        assert AysioFlow is not None
+        assert AsyncAysioFlow is not None
+
+    def test_model_exports(self):
+        from asyioflow import SubmitJobRequest, Job, Workflow, WorkflowStep, Priority, JobStatus
+        assert SubmitJobRequest is not None
+
+    def test_exception_exports(self):
+        from asyioflow import AysioFlowError, JobNotFoundError, ValidationError, ServerError
+        from asyioflow import WorkflowStepFailedError, WorkflowTimeoutError
+        assert AysioFlowError is not None

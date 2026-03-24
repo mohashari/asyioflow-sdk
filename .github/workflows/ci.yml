@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+        working-directory: sdk/python
+      - name: Test
+        run: pytest --cov=asyioflow --cov-report=xml
+        working-directory: sdk/python
+
+  test-typescript:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ["18", "20"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install
+        run: npm install
+        working-directory: sdk/typescript
+      - name: Test
+        run: npm test -- --coverage
+        working-directory: sdk/typescript
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check sdk/python/asyioflow
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+        working-directory: sdk/typescript
+      - run: npx tsc --noEmit
+        working-directory: sdk/typescript
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [test-python, test-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start engine
+        run: docker compose up -d
+      - name: Wait for engine ready
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/api/v1/jobs && break || sleep 1
+          done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+        working-directory: sdk/python
+      - run: pytest tests/ -m integration --timeout=60
+        working-directory: sdk/python
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+        working-directory: sdk/typescript
+      - run: npx jest --testPathPattern=integration --testTimeout=60000
+        working-directory: sdk/typescript
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

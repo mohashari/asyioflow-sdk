@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Optional
 
@@ -142,6 +143,40 @@ class AsyncAysioFlow:
     async def cancel(self, job_id: str) -> None:
         """Cancel a job. Raises JobNotFoundError if the job does not exist."""
         await self._http.delete(_JOB_URL.format(id=job_id))
+
+    async def submit_workflow(self, workflow: "Workflow") -> "dict[str, Job]":
+        """Execute a workflow DAG asynchronously. Returns step name → Job mapping.
+
+        Steps are executed in dependency order. Polling uses asyncio.sleep (2 seconds).
+        Raises WorkflowStepFailedError if any step fails.
+        Raises WorkflowTimeoutError if total workflow execution exceeds workflow_timeout seconds.
+        """
+        _validate_dag(workflow)
+        completed: dict[str, Job] = {}
+        pending = {step.name: step for step in workflow.steps}
+        deadline = asyncio.get_event_loop().time() + self._workflow_timeout
+
+        while pending:
+            ready = [
+                step
+                for step in pending.values()
+                if all(dep in completed for dep in step.depends_on)
+            ]
+            for step in ready:
+                job = await self.submit(SubmitJobRequest(type=step.job_type, payload=step.payload))
+                while True:
+                    if asyncio.get_event_loop().time() > deadline:
+                        raise WorkflowTimeoutError(step.name)
+                    job = await self.get(job.id)
+                    if job.status == JobStatus.COMPLETED:
+                        completed[step.name] = job
+                        del pending[step.name]
+                        break
+                    if job.status in _TERMINAL:
+                        raise WorkflowStepFailedError(step.name, job.id, dict(completed))
+                    await asyncio.sleep(_POLL_INTERVAL)
+
+        return completed
 
     async def aclose(self) -> None:
         await self._http.aclose()

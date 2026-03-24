@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from .exceptions import WorkflowStepFailedError, WorkflowTimeoutError
@@ -11,6 +12,43 @@ _JOB_URL = "/api/v1/jobs/{id}"
 _POLL_INTERVAL = 2.0
 _TERMINAL = frozenset({"completed", "failed", "dead"})
 _DEFAULT_WORKFLOW_TIMEOUT = 600.0  # 10 minutes
+
+
+def _validate_dag(workflow: "Workflow") -> None:
+    """Raise ValueError for duplicate step names, dangling deps, or cycles."""
+    names = [s.name for s in workflow.steps]
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            raise ValueError(f"Duplicate workflow step name: {name!r}")
+        seen.add(name)
+
+    name_set = set(names)
+    for step in workflow.steps:
+        for dep in step.depends_on:
+            if dep not in name_set:
+                raise ValueError(
+                    f"Step {step.name!r} depends on unknown step {dep!r}"
+                )
+
+    # DFS cycle detection
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    deps = {s.name: s.depends_on for s in workflow.steps}
+
+    def dfs(node: str) -> None:
+        if node in visiting:
+            raise ValueError(f"Cycle detected in workflow at step {node!r}")
+        if node in visited:
+            return
+        visiting.add(node)
+        for dep in deps[node]:
+            dfs(dep)
+        visiting.discard(node)
+        visited.add(node)
+
+    for name in names:
+        dfs(name)
 
 
 class AysioFlow:
@@ -39,6 +77,40 @@ class AysioFlow:
     def cancel(self, job_id: str) -> None:
         """Cancel a job. Raises JobNotFoundError if the job does not exist."""
         self._http.delete(_JOB_URL.format(id=job_id))
+
+    def submit_workflow(self, workflow: "Workflow") -> "dict[str, Job]":
+        """Execute a workflow DAG. Returns completed step name → Job mapping.
+
+        Steps are executed in dependency order. Polling is fixed at 2 seconds.
+        Raises WorkflowStepFailedError if any step fails (includes partial results).
+        Raises WorkflowTimeoutError if a step exceeds workflow_timeout seconds.
+        """
+        _validate_dag(workflow)
+        completed: dict[str, Job] = {}
+        pending = {step.name: step for step in workflow.steps}
+        deadline = time.monotonic() + self._workflow_timeout
+
+        while pending:
+            ready = [
+                step
+                for step in pending.values()
+                if all(dep in completed for dep in step.depends_on)
+            ]
+            for step in ready:
+                job = self.submit(SubmitJobRequest(type=step.job_type, payload=step.payload))
+                while True:
+                    job = self.get(job.id)
+                    if job.status.value == "completed":
+                        completed[step.name] = job
+                        del pending[step.name]
+                        break
+                    if job.status.value in ("failed", "dead"):
+                        raise WorkflowStepFailedError(step.name, job.id, dict(completed))
+                    if time.monotonic() > deadline:
+                        raise WorkflowTimeoutError(step.name)
+                    time.sleep(_POLL_INTERVAL)
+
+        return completed
 
     def close(self) -> None:
         self._http.close()

@@ -5,12 +5,12 @@ from typing import Optional
 
 from .exceptions import WorkflowStepFailedError, WorkflowTimeoutError
 from ._http import AsyncHttpClient, HttpClient
-from .models import Job, SubmitJobRequest, Workflow
+from .models import Job, JobStatus, SubmitJobRequest, Workflow
 
 _JOBS_URL = "/api/v1/jobs"
 _JOB_URL = "/api/v1/jobs/{id}"
 _POLL_INTERVAL = 2.0
-_TERMINAL = frozenset({"completed", "failed", "dead"})
+_TERMINAL: frozenset[JobStatus] = frozenset({JobStatus.FAILED, JobStatus.DEAD})
 _DEFAULT_WORKFLOW_TIMEOUT = 600.0  # 10 minutes
 
 
@@ -83,7 +83,7 @@ class AysioFlow:
 
         Steps are executed in dependency order. Polling is fixed at 2 seconds.
         Raises WorkflowStepFailedError if any step fails (includes partial results).
-        Raises WorkflowTimeoutError if a step exceeds workflow_timeout seconds.
+        Raises WorkflowTimeoutError if the total workflow execution exceeds workflow_timeout seconds.
         """
         _validate_dag(workflow)
         completed: dict[str, Job] = {}
@@ -100,11 +100,11 @@ class AysioFlow:
                 job = self.submit(SubmitJobRequest(type=step.job_type, payload=step.payload))
                 while True:
                     job = self.get(job.id)
-                    if job.status.value == "completed":
+                    if job.status == JobStatus.COMPLETED:
                         completed[step.name] = job
                         del pending[step.name]
                         break
-                    if job.status.value in ("failed", "dead"):
+                    if job.status in _TERMINAL:
                         raise WorkflowStepFailedError(step.name, job.id, dict(completed))
                     if time.monotonic() > deadline:
                         raise WorkflowTimeoutError(step.name)

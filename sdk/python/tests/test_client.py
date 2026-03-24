@@ -91,6 +91,37 @@ from asyioflow.models import Workflow, WorkflowStep
 from asyioflow.exceptions import WorkflowStepFailedError, WorkflowTimeoutError
 
 
+class TestValidateDag:
+    def test_duplicate_step_name_raises_value_error(self):
+        from asyioflow.client import _validate_dag
+        from asyioflow.models import Workflow, WorkflowStep
+        wf = Workflow(name="bad", steps=[
+            WorkflowStep(name="fetch", job_type="fetch-data"),
+            WorkflowStep(name="fetch", job_type="fetch-data-2"),
+        ])
+        with pytest.raises(ValueError, match="Duplicate"):
+            _validate_dag(wf)
+
+    def test_dangling_dependency_raises_value_error(self):
+        from asyioflow.client import _validate_dag
+        from asyioflow.models import Workflow, WorkflowStep
+        wf = Workflow(name="bad", steps=[
+            WorkflowStep(name="transform", job_type="transform-data", depends_on=["nonexistent"]),
+        ])
+        with pytest.raises(ValueError, match="unknown step"):
+            _validate_dag(wf)
+
+    def test_cycle_raises_value_error(self):
+        from asyioflow.client import _validate_dag
+        from asyioflow.models import Workflow, WorkflowStep
+        wf = Workflow(name="bad", steps=[
+            WorkflowStep(name="a", job_type="job-a", depends_on=["b"]),
+            WorkflowStep(name="b", job_type="job-b", depends_on=["a"]),
+        ])
+        with pytest.raises(ValueError, match="[Cc]ycle"):
+            _validate_dag(wf)
+
+
 class TestAysioFlowWorkflow:
     def _completed_job(self, job_id: str, job_type: str) -> dict:
         now = "2026-01-01T00:00:00Z"
